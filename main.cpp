@@ -9,6 +9,8 @@
 #include <glm/vec4.hpp>
 #include <iostream>
 #include <optional>
+#include <shaderc/shaderc.hpp>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -731,20 +733,23 @@ SwapChain::~SwapChain() {
     this->handle = VK_NULL_HANDLE;
 }
 
-std::vector<char> loadSpirvFile(const std::string& filename) {
-    std::ifstream file(filename, std::ios::ate | std::ios::binary);  // read at end of file and read as binary.
+std::vector<uint32_t> compileSpriv(std::string src, shaderc_shader_kind kind) {
+    shaderc::Compiler compiler;
+    shaderc::CompileOptions options;
+    bool optimize = false;
 
-    if (!file.is_open()) {
-        throw std::runtime_error("could not open shader file \'" + filename + "\'!");
+    // options.AddMacroDefinition("MY_DEFINE", "1");
+    if (optimize)
+        options.SetOptimizationLevel(shaderc_optimization_level_size);
+
+    shaderc::SpvCompilationResult module =
+        compiler.CompileGlslToSpv(src, kind, "shader_src", options);
+
+    if (module.GetCompilationStatus() != shaderc_compilation_status_success) {
+        throw std::runtime_error(module.GetErrorMessage());
     }
-    // we read at end to determine file size
-    size_t fileSize = (size_t)file.tellg();
-    std::vector<char> buffer(fileSize);
-    file.seekg(0);
-    file.read(buffer.data(), fileSize);
-    file.close();
 
-    return buffer;
+    return {module.cbegin(), module.cend()};
 }
 
 class RenderPass {
@@ -809,7 +814,11 @@ RenderPass::~RenderPass() {
 
 class Pipeline {
    public:
-    Pipeline(VkDevice device, VkExtent2D extent, VkRenderPass renderPass, VkDescriptorSetLayout setLayout);
+    Pipeline(VkDevice device,
+             VkExtent2D extent,
+             VkRenderPass renderPass,
+             VkDescriptorSetLayout setLayout,
+             std::string fragmentShaderSource);
     ~Pipeline();
     VkPipelineLayout layout;
     VkPipeline handle;
@@ -817,19 +826,38 @@ class Pipeline {
    private:
     VkDevice device;
 };
+const std::string vertexShaderSource =
+    "#version 450\n"
+    "\n"
+    "vec2 positions[6] = vec2[](\n"
+    "    vec2(-1.0, -1.0),\n"
+    "    vec2(1.0, 1.0),\n"
+    "    vec2(-1.0, 1.0),\n"
+    "    vec2(1.0, 1.0),\n"
+    "    vec2(-1.0, -1.0),\n"
+    "    vec2(1.0, -1.0)\n"
+    ");\n"
+    "\n"
+    "void main() {\n"
+    "   gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);\n"
+    "}\n"
+    "";
 
-Pipeline::Pipeline(VkDevice device, VkExtent2D extent, VkRenderPass renderPass, VkDescriptorSetLayout setLayout) {
+Pipeline::Pipeline(VkDevice device, VkExtent2D extent, VkRenderPass renderPass, VkDescriptorSetLayout setLayout, std::string fragmentShaderSource) {
     this->device = device;
     /*
         --- set up shaders
     */
-    auto vertCode = loadSpirvFile("build/shaders/shader.vert.spv");
+
+    // vertex shader
+
+    std::vector<uint32_t> vertexShader = compileSpriv(vertexShaderSource, shaderc_glsl_vertex_shader);
 
     VkShaderModule vertShaderModule;
     VkShaderModuleCreateInfo vertModuleCreateInfo{};
     vertModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    vertModuleCreateInfo.codeSize = vertCode.size();
-    vertModuleCreateInfo.pCode = reinterpret_cast<const uint32_t*>(vertCode.data());
+    vertModuleCreateInfo.codeSize = vertexShader.size() * sizeof(uint32_t);
+    vertModuleCreateInfo.pCode = vertexShader.data();
     if (vkCreateShaderModule(device, &vertModuleCreateInfo, nullptr, &vertShaderModule) != VK_SUCCESS) {
         throw std::runtime_error("failed to create shader module!");
     }
@@ -839,12 +867,14 @@ Pipeline::Pipeline(VkDevice device, VkExtent2D extent, VkRenderPass renderPass, 
     vertCreateInfo.module = vertShaderModule;
     vertCreateInfo.pName = "main";
 
+    // fragment shader
+    std::vector<uint32_t> fragmentShader = compileSpriv(fragmentShaderSource, shaderc_glsl_fragment_shader);
     VkShaderModule fragShaderModule;
-    auto fragCode = loadSpirvFile("build/shaders/shader.frag.spv");
+
     VkShaderModuleCreateInfo fragModuleCreateInfo{};
     fragModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    fragModuleCreateInfo.codeSize = fragCode.size();
-    fragModuleCreateInfo.pCode = reinterpret_cast<const uint32_t*>(fragCode.data());
+    fragModuleCreateInfo.codeSize = fragmentShader.size() * sizeof(uint32_t);
+    fragModuleCreateInfo.pCode = fragmentShader.data();
     if (vkCreateShaderModule(device, &fragModuleCreateInfo, nullptr, &fragShaderModule) != VK_SUCCESS) {
         throw std::runtime_error("failed to create shader module!");
     }
@@ -855,6 +885,7 @@ Pipeline::Pipeline(VkDevice device, VkExtent2D extent, VkRenderPass renderPass, 
     fragCreateInfo.module = fragShaderModule;
     fragCreateInfo.pName = "main";
 
+    // shader stages
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages = {
         vertCreateInfo,
         fragCreateInfo};
@@ -1337,6 +1368,7 @@ void RecordCommand(VkCommandBuffer commandBuffer,
 
 class Application {
    public:
+    Application(std::string fragmentShaderSource) : fragmentShaderSource(fragmentShaderSource) {}
     void Init() {
         nextSemaphoreIdx = 0;
         window = new Window();
@@ -1455,7 +1487,7 @@ class Application {
         uniform = new Uniform(device->physicalDevice, device->handle, swapChain->imageViewHandles.size());
         descriptorSet = new DescriptorSet(device->handle, swapChain->imageViewHandles.size(), uniform->bufferHandles);
 
-        pipeline = new Pipeline(device->handle, swapChain->extent, renderPass->handle, descriptorSet->layout);
+        pipeline = new Pipeline(device->handle, swapChain->extent, renderPass->handle, descriptorSet->layout, fragmentShaderSource);
         framebuffer = new Framebuffer(device->handle, swapChain->imageViewHandles, swapChain->extent, renderPass->handle);
         commandBuffer = new CommandBuffer(device->handle, device->commandPoolHandle, framebuffer->handles);
 
@@ -1492,6 +1524,7 @@ class Application {
     }
 
    private:
+    Application();
     void CleanupExtent() {
         if (commandBuffer != nullptr)
             delete commandBuffer;
@@ -1519,14 +1552,37 @@ class Application {
     Uniform* uniform;
     UniformBufferObject ubo;
     size_t nextSemaphoreIdx;
+    std::string fragmentShaderSource;
 
 #ifdef ENABLE_VALIDATION_LAYERS
     VkDebugUtilsMessengerEXT debugMessenger;
 #endif
 };
 
-int main() {
-    Application* app = new Application;
+int main(int argc, char** argv) {
+    // parse args
+    std::string path;
+    if (argc == 1) {
+        std::cout << "[INFO] selecting default shader file \'shader.frag\'" << std::endl;
+        path = "shader.frag";
+    } else if (argc == 2) {
+        path = argv[1];
+    } else {
+        std::cerr << "specify path to uncompiled fragment shader glsl source." << std::endl;
+        return -1;
+    }
+    std::cout << "[INFO] read fragment shader \'" << path << "\'" << std::endl;
+
+    std::ifstream srcFile(path);
+    if (srcFile.fail()) {
+        std::cerr << "[ERROR] file \'" + std::string(path) + "\' does not exist!" << std::endl;
+        return -1;
+    }
+    std::stringstream buffer;
+    buffer << srcFile.rdbuf();
+
+    // setup app
+    Application* app = new Application(buffer.str());
     try {
         app->Init();
         app->Run();
