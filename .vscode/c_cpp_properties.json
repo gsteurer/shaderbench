@@ -6,7 +6,7 @@
                 "${workspaceFolder}/*",
                 "~/Code/cpp_workbench/external/glm",
                 "~/Code/c_workbench/external/glfw/include",
-                "~/SDK/VulkanSDK/1.2.182.0/macOS/include"
+                "~/SDK/Vulkan/1.3.261.1/macOS/include"
             ],
             "defines": [
                 "ENABLE_VALIDATION_LAYERS"
@@ -17,7 +17,7 @@
             "compilerPath": "/usr/bin/clang",
             "cStandard": "c17",
             "cppStandard": "c++17",
-            "intelliSenseMode": "macos-clang-x64",
+            "intelliSenseMode": "macos-clang-arm64",
             "browse": {
                 "limitSymbolsToIncludedHeaders": true
             }

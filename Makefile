@@ -1,5 +1,5 @@
-INCLUDES=-I$${HOME}/Code/c_workbench/external/glfw/include -I$${HOME}/Code/cpp_workbench/external/glm -I$${HOME}/SDK/VulkanSDK/1.2.182.0/macOS/include  
-LIB_LOCATIONS=-L$${HOME}/Code/c_workbench/external/glfw/src -L$${HOME}/SDK/VulkanSDK/1.2.182.0/macOS/lib
+INCLUDES=-I$${HOME}/Code/c_workbench/external/glfw/include -I$${HOME}/Code/cpp_workbench/external/glm -I$${HOME}/SDK/Vulkan/1.3.261.1/macOS/include
+LIB_LOCATIONS=-L$${HOME}/Code/c_workbench/external/glfw/build/src -L$${HOME}/SDK/Vulkan/1.3.261.1/macOS/lib
 LIBS=-lglfw3 -lpthread -lvulkan -lshaderc_combined
 
 FRAMEWORKS=-framework Cocoa -framework IOKit -framework CoreAudio
